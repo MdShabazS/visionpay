@@ -1,23 +1,21 @@
 # VisionPay 👁️💸
-### Indian Currency Detector for the Visually Impaired
+### Real-Time Indian Currency Detector for the Visually Impaired
 
-An end-to-end, industrial-ready system that helps blind and visually impaired users identify Indian currency notes (₹10, ₹20, ₹50, ₹100, ₹200, ₹500, ₹2000) using their **voice** or a **single large button**, with a webcam and **spoken feedback**.
+A lightweight, offline desktop tool that uses a **webcam** and **MobileNetV2** to identify Indian banknotes in real time and **announce them aloud**. Built to assist blind and visually impaired users with confident cash handling — no internet, no special hardware.
 
 ---
 
 ## ✨ Features
 
-- 🎙️ **Voice Assistant** — say *"scan"*, *"continuous"*, *"total"*, *"reset"*, *"help"* (Web Speech API)
-- 🟢 **Big accessible DETECT button** + keyboard `SPACE`/`V`/`C` shortcuts
-- 📷 **Live webcam** with on-screen scan overlay
-- 🔊 **Text-to-Speech** announces each detected note
-- 🪙 **Session wallet** — adds up detected notes, breakdown by denomination
-- 🔁 **Continuous mode** — auto-detect every 2 s
-- 🌐 **Bilingual** — English + Hindi (TTS + voice commands)
-- ♿ **Accessibility** — large fonts, high-contrast toggle, haptic vibration
-- 🧠 **Custom-trained MobileNetV2** with transfer learning + fine-tuning
-- 🔒 **Confidence threshold** + `background` class so it never lies
-- ⚡ Lightweight — runs on CPU
+- 📷 **Real-time webcam detection** at ~30 FPS (TFLite)
+- 🔊 **Text-to-Speech** announces each detected note (`say` on macOS, `espeak` on Linux)
+- 🧠 **MobileNetV2 transfer learning** — small, fast, accurate
+- 🪙 **Auto-count mode** — sums up notes shown one after another
+- 🎯 **Temporal smoothing** — confidence + margin + majority-vote across frames prevents flicker / false reads
+- 🎚️ **Adjustable confidence threshold** at runtime (`+` / `-` keys)
+- 🔇 **Mute toggle** for silent mode
+- ⚡ **Runs on CPU** — no GPU required
+- 📦 **TFLite export** — 3–4× faster inference than raw Keras
 
 ---
 
@@ -25,14 +23,14 @@ An end-to-end, industrial-ready system that helps blind and visually impaired us
 
 ```
 currency-detector/
-├── VisionPay.ipynb        # Training notebook (MobileNetV2 transfer learning)
+├── VisionPay.ipynb        # Training notebook (MobileNetV2 + TFLite export)
 ├── capture_dataset.py     # Webcam tool to build the dataset
-├── app.py                 # Flask backend + /predict
-├── templates/index.html   # Pro UI (Tailwind, accessible)
-├── static/js/app.js       # Camera + voice + TTS client
-├── dataset/               # Created by capture script: 10/, 20/, ... 2000/, background/
-├── model/                 # Saved model + class_names.json
+├── realtime.py            # Real-time webcam classifier with TTS
+├── realtime.command       # macOS double-click launcher
+├── dataset/               # (gitignored) 10/, 20/, 50/, 100/, 200/, 500/, background/
+├── model/                 # class_names.json + (gitignored) .keras / .tflite
 ├── requirements.txt
+├── HANDOFF.md             # Project state notes for resuming work
 └── README.md
 ```
 
@@ -42,7 +40,8 @@ currency-detector/
 
 ### 1. Install
 ```bash
-cd currency-detector
+git clone https://github.com/MdShabazS/visionpay.git
+cd visionpay
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -52,71 +51,76 @@ pip install -r requirements.txt
 python capture_dataset.py
 ```
 - `SPACE` save • `n`/`p` next/prev class • `a` auto-capture • `q` quit
-- Capture **80–150 images per denomination**, varying lighting, angle, distance, front/back, and backgrounds
-- Don't forget the `background` class (no note in frame) — this prevents false positives
+- **300+ images per denomination** with varied lighting, angles, distances, front/back
+- Capture **lots of variety in `background`** — hands, papers, electronics, random objects, plain surfaces. This prevents the model from misclassifying non-note objects.
 
 ### 3. Train the model
-```bash
-jupyter notebook VisionPay.ipynb
-```
-Run all cells. Saves `model/visionpay_model.keras` + `model/class_names.json`.
+Open `VisionPay.ipynb` in VS Code or Jupyter → **Run All**.
+Outputs:
+- `model/visionpay_model.keras`
+- `model/visionpay_model.tflite` (preferred at runtime)
+- `model/class_names.json`
 
-### 4. Run the web app
+### 4. Run real-time detector
 ```bash
-python app.py
-# open http://localhost:5050
+python realtime.py
 ```
-
-> Use **Chrome / Edge** for full Web Speech API (voice) support. Allow camera + microphone permissions.
 
 ---
 
-## 🎮 Usage
+## 🎮 Hotkeys (in `realtime.py`)
 
-| Action | Voice | Keyboard | Button |
-|---|---|---|---|
-| Detect note | "scan" / "detect" / "what note" | `SPACE` | DETECT |
-| Toggle voice listening | — | `V` | Voice Assistant |
-| Continuous auto-scan | "continuous" / "stop" | `C` | Continuous Mode |
-| Speak total | "total" | — | — |
-| Reset total | "reset" | — | Reset Total |
+| Key | Action |
+|---|---|
+| `q` | Quit |
+| `r` | Reset total |
+| `s` | Speak total |
+| `a` | Toggle auto-count mode |
+| `m` | Mute / unmute TTS |
+| `+` / `-` | Increase / decrease confidence threshold |
 
 ---
 
 ## 🧠 Model details
 
 - **Backbone:** MobileNetV2 (ImageNet pretrained)
-- **Head:** GAP → Dropout → Dense(128) → Dropout → Softmax
-- **Training:** 12 epochs frozen base + 8 epochs fine-tuning last 30 layers
+- **Head:** GAP → BatchNorm → Dropout → Dense(256) → BatchNorm → Dropout → Softmax
+- **Training:** ~20 epochs frozen base + ~20 epochs fine-tuning last 60 layers
 - **Input:** 224×224 RGB, MobileNetV2 preprocessing (`[-1, 1]`)
-- **Augmentation:** flip, rotation, zoom, translation, brightness, contrast
-- **Classes:** `10, 20, 50, 100, 200, 500, 2000, background`
+- **Augmentation:** flip, rotation (0.25), zoom (0.25), translation, brightness, contrast
+- **Class weighting** to handle dataset imbalance
+- **Classes:** `10, 20, 50, 100, 200, 500, background`
 
-Expected accuracy: **95%+** with ~100 well-varied images per class.
-
----
-
-## 🔧 Enhancement ideas (already wired or easy to add)
-
-- ✅ Background class to reject non-currency frames
-- ✅ Top-3 predictions returned for debugging
-- ✅ Confidence threshold control
-- ✅ Continuous mode + session totals
-- 🔜 ONNX / TFLite export for Raspberry Pi or Android
-- 🔜 Counterfeit-note check via UV/IR pattern detection
-- 🔜 Multi-note counting in a single frame (object detection w/ YOLO)
-- 🔜 Offline desktop wrapper (PyInstaller + Tkinter)
+**Validation accuracy:** ~93% with ~300 images per class.
 
 ---
 
-## 🧑‍🦯 Designed for accessibility
+## ⚠️ Known limitation
 
-- High-contrast dark UI with adjustable contrast
-- All actions reachable by single key or single voice command
-- Large primary button (160×160 px) with focus ring
-- Audio + haptic feedback on every detection
-- Bilingual support (English / Hindi)
-- Works on phones (rear camera supported via Flip button)
+The model is a **closed-set classifier** — softmax always picks one of the trained classes. So unfamiliar objects (a mouse, a paper notebook, a green bottle cap) can be confidently misclassified as a note.
+
+**Mitigation:** large, varied `background/` class.
+**Long-term fix:** switch to **YOLOv8** for bounding-box detection so the model can say *"no note in frame"*. Planned, not yet implemented.
+
+---
+
+## 🔧 Roadmap
+
+- [ ] **YOLOv8** object detection (bounding boxes) to eliminate non-note false positives
+- [ ] **Multi-note counting** in a single frame
+- [ ] **Counterfeit feature** detection (security thread / watermark)
+- [ ] **Bilingual TTS** — English + Hindi toggle
+- [ ] **Mobile app** port (TFLite already ready)
+- [ ] **Raspberry Pi** edge deployment
+
+---
+
+## 🧑‍🦯 Built for accessibility
+
+- Pure audio output — no need to look at the screen
+- Keyboard-only operation
+- Works fully offline
+- Free & open-source
 
 ---
 
