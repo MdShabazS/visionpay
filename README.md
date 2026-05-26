@@ -1,128 +1,124 @@
-# VisionPay 👁️💸
-### Real-Time Indian Currency Detector for the Visually Impaired
+# VisionPay
 
-A lightweight, offline desktop tool that uses a **webcam** and **MobileNetV2** to identify Indian banknotes in real time and **announce them aloud**. Built to assist blind and visually impaired users with confident cash handling — no internet, no special hardware.
+A real-time Indian currency note classifier built to assist visually impaired users.
+Point a webcam at a banknote, and the app speaks the denomination out loud.
 
----
+It runs fully offline on a regular laptop — no GPU, no cloud, no special hardware.
 
-## ✨ Features
+Currently supports: ₹10, ₹20, ₹50, ₹100, ₹200, ₹500.
 
-- 📷 **Real-time webcam detection** at ~30 FPS (TFLite)
-- 🔊 **Text-to-Speech** announces each detected note (`say` on macOS, `espeak` on Linux)
-- 🧠 **MobileNetV2 transfer learning** — small, fast, accurate
-- 🪙 **Auto-count mode** — sums up notes shown one after another
-- 🎯 **Temporal smoothing** — confidence + margin + majority-vote across frames prevents flicker / false reads
-- 🎚️ **Adjustable confidence threshold** at runtime (`+` / `-` keys)
-- 🔇 **Mute toggle** for silent mode
-- ⚡ **Runs on CPU** — no GPU required
-- 📦 **TFLite export** — 3–4× faster inference than raw Keras
+## How it works
 
----
+A MobileNetV2 model (ImageNet-pretrained) is fine-tuned on a custom dataset of
+currency images captured through a webcam. At runtime, the model is loaded as a
+TFLite interpreter for speed (~30 FPS on a MacBook CPU), and predictions across
+consecutive frames are aggregated using a majority vote with confidence and
+margin gates so the announcement only fires once the prediction is stable.
 
-## 📁 Project structure
+The dataset includes a `background` class containing non-note images (hands,
+papers, surfaces, random objects). This is what the model uses as the
+"no note in frame" answer.
+
+## Project layout
 
 ```
-currency-detector/
-├── VisionPay.ipynb        # Training notebook (MobileNetV2 + TFLite export)
-├── capture_dataset.py     # Webcam tool to build the dataset
-├── realtime.py            # Real-time webcam classifier with TTS
-├── realtime.command       # macOS double-click launcher
-├── dataset/               # (gitignored) 10/, 20/, 50/, 100/, 200/, 500/, background/
-├── model/                 # class_names.json + (gitignored) .keras / .tflite
+.
+├── capture_dataset.py      # webcam tool to record training images per class
+├── VisionPay.ipynb         # training notebook (MobileNetV2 + TFLite export)
+├── realtime.py             # the actual detector — webcam loop, smoothing, TTS
+├── realtime.command        # macOS double-click launcher
+├── model/
+│   ├── visionpay_model.keras    # (gitignored)
+│   ├── visionpay_model.tflite   # (gitignored, preferred at runtime)
+│   └── class_names.json
+├── dataset/                # (gitignored) class-folder images
 ├── requirements.txt
-├── HANDOFF.md             # Project state notes for resuming work
 └── README.md
 ```
 
----
+## Setup
 
-## 🚀 Quickstart
-
-### 1. Install
 ```bash
 git clone https://github.com/MdShabazS/visionpay.git
 cd visionpay
-python -m venv venv && source venv/bin/activate
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Capture your dataset
+Tested on Python 3.13 / TensorFlow 2.21 / macOS.
+
+## Usage
+
+### 1. Capture a dataset
+
 ```bash
 python capture_dataset.py
 ```
-- `SPACE` save • `n`/`p` next/prev class • `a` auto-capture • `q` quit
-- **300+ images per denomination** with varied lighting, angles, distances, front/back
-- Capture **lots of variety in `background`** — hands, papers, electronics, random objects, plain surfaces. This prevents the model from misclassifying non-note objects.
 
-### 3. Train the model
-Open `VisionPay.ipynb` in VS Code or Jupyter → **Run All**.
-Outputs:
-- `model/visionpay_model.keras`
-- `model/visionpay_model.tflite` (preferred at runtime)
-- `model/class_names.json`
+Keys: `SPACE` save, `n`/`p` switch class, `a` auto-capture, `q` quit.
 
-### 4. Run real-time detector
+Aim for ~300 images per denomination, with variation in lighting, angle,
+distance, and front/back. The `background` class needs at least as much
+variety as everything else combined — anything that isn't a note (hands,
+paper, electronics, plain surfaces) belongs here.
+
+### 2. Train
+
+Open `VisionPay.ipynb` and run all cells. It saves both `.keras` and `.tflite`
+models plus `class_names.json` into `model/`.
+
+### 3. Run
+
 ```bash
 python realtime.py
 ```
 
----
+Hotkeys:
 
-## 🎮 Hotkeys (in `realtime.py`)
+| Key   | Action                       |
+|-------|------------------------------|
+| `q`   | quit                         |
+| `r`   | reset running total          |
+| `s`   | speak the running total      |
+| `a`   | toggle auto-count mode       |
+| `m`   | mute / unmute                |
+| `+/-` | raise / lower the threshold  |
 
-| Key | Action |
-|---|---|
-| `q` | Quit |
-| `r` | Reset total |
-| `s` | Speak total |
-| `a` | Toggle auto-count mode |
-| `m` | Mute / unmute TTS |
-| `+` / `-` | Increase / decrease confidence threshold |
+## Model
 
----
+- Backbone: MobileNetV2, 224×224 input, ImageNet weights
+- Head: GAP → BatchNorm → Dropout → Dense(256) → BatchNorm → Dropout → Softmax
+- Two-phase training: ~20 epochs head only, then ~20 epochs fine-tuning the
+  last 60 layers of the backbone
+- Augmentation: horizontal flip, ±25% rotation/zoom, ±15% translation,
+  ±30% brightness/contrast
+- Class weights to compensate for dataset imbalance
+- Validation accuracy: ~93% with ~300 images/class
 
-## 🧠 Model details
+The Keras model is converted to a quantized TFLite model at the end of
+training. `realtime.py` prefers the TFLite file when available and falls
+back to the Keras model otherwise.
 
-- **Backbone:** MobileNetV2 (ImageNet pretrained)
-- **Head:** GAP → BatchNorm → Dropout → Dense(256) → BatchNorm → Dropout → Softmax
-- **Training:** ~20 epochs frozen base + ~20 epochs fine-tuning last 60 layers
-- **Input:** 224×224 RGB, MobileNetV2 preprocessing (`[-1, 1]`)
-- **Augmentation:** flip, rotation (0.25), zoom (0.25), translation, brightness, contrast
-- **Class weighting** to handle dataset imbalance
-- **Classes:** `10, 20, 50, 100, 200, 500, background`
+## Known limitation
 
-**Validation accuracy:** ~93% with ~300 images per class.
+This is a closed-set classifier — softmax always returns one of the trained
+classes, so unfamiliar objects (a green bottle cap, a notebook page, a
+circuit board) can be confidently misclassified as a note.
 
----
+The current mitigation is a large, varied `background` class plus a
+confidence + margin threshold. The proper fix is to switch to a detector
+(YOLOv8) that produces bounding boxes and can return zero detections —
+that's on the roadmap.
 
-## ⚠️ Known limitation
+## Roadmap
 
-The model is a **closed-set classifier** — softmax always picks one of the trained classes. So unfamiliar objects (a mouse, a paper notebook, a green bottle cap) can be confidently misclassified as a note.
+- YOLOv8-based detector to replace the closed-set classifier
+- Multi-note counting in a single frame
+- Hindi TTS toggle
+- TFLite deployment to Android / Raspberry Pi
+- Counterfeit-feature checks (security thread, watermark)
 
-**Mitigation:** large, varied `background/` class.
-**Long-term fix:** switch to **YOLOv8** for bounding-box detection so the model can say *"no note in frame"*. Planned, not yet implemented.
+## License
 
----
-
-## 🔧 Roadmap
-
-- [ ] **YOLOv8** object detection (bounding boxes) to eliminate non-note false positives
-- [ ] **Multi-note counting** in a single frame
-- [ ] **Counterfeit feature** detection (security thread / watermark)
-- [ ] **Bilingual TTS** — English + Hindi toggle
-- [ ] **Mobile app** port (TFLite already ready)
-- [ ] **Raspberry Pi** edge deployment
-
----
-
-## 🧑‍🦯 Built for accessibility
-
-- Pure audio output — no need to look at the screen
-- Keyboard-only operation
-- Works fully offline
-- Free & open-source
-
----
-
-## 📝 License
-MIT — built for educational and assistive use.
+MIT
