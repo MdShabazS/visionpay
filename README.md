@@ -134,6 +134,21 @@ detections — that's on the roadmap.
 - [ ] TFLite deployment to Android / Raspberry Pi
 - [ ] Counterfeit-feature checks (security thread, watermark)
 
+## Contributing
+
+Issues and pull requests are welcome. For larger changes, please open an issue
+first to discuss what you would like to change.
+
+```bash
+git checkout -b feature/my-change
+# ... commits ...
+git push origin feature/my-change
+```
+
 ## License
 
 Released under the [MIT License](LICENSE).
+
+## Author
+
+**Mohammed Shabaz S** — [@MdShabazS](https://github.com/MdShabazS)
